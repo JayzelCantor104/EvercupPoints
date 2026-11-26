@@ -31,7 +31,7 @@ EvercupPoints/
 │       ├── point-transactions/    points earned per purchase
 │       ├── redemptions/           rewards claimed
 │       └── common/filters/        standard error response
-├── frontend/     React app (staff scanner, members, rewards, sign-up)
+├── frontend/     React app (staff scanner, members, rewards, sign-up, member card)
 ├── database/     MySQL schema export
 └── postman/      Postman collection
 ```
@@ -40,10 +40,17 @@ EvercupPoints/
 
 ### 1. Database
 
-Start MySQL in XAMPP, then create the database. Either import
-`database/evercuppoints.sql` in phpMyAdmin, or just create an empty
-database named `evercuppoints` — the backend creates the tables itself
-on first run.
+Start MySQL in XAMPP, then choose one:
+
+- **Recommended:** import `database/evercuppoints.sql` in phpMyAdmin. It creates
+  the `evercuppoints` database with all five tables, their keys, the CHECK rules
+  and a small set of demo data (three members, purchases and claims), so you can
+  skip `npm run seed`. Importing **replaces** those tables, so do not import it
+  over a database whose data you want to keep.
+- **Empty start:** create an empty database named `evercuppoints`. The backend
+  creates the tables on first run and `npm run seed` adds the logins and rewards.
+  (TypeORM cannot create CHECK constraints on MySQL, so this route has the same
+  rules enforced by the API only.)
 
 ### 2. Backend
 
@@ -82,10 +89,27 @@ on any other host the browser blocks camera access without HTTPS.
 Every endpoint lives under `/api/v1`. Full request and response examples are in
 the Postman collection at `postman/EvercupPoints.postman_collection.json`.
 
+### Testing with Postman
+
+Import the collection, then right-click it > **Run collection**. Its 55 requests
+run top to bottom in 7 folders (Auth, Customers, Rewards, Point Transactions,
+Redemptions, Staff Users & Roles, Deletes & Integrity) with 91 tests:
+
+- Login saves the JWT, and every request after it reuses the token.
+- Each create saves its new ID (customer, QR code, reward, transaction,
+  redemption, staff) for the requests that follow, so nothing is hardcoded.
+- Every request checks its status code, and every error is checked for the
+  standard error format.
+- Each run uses fresh receipt numbers, emails and usernames, so it can be run
+  again on the same database. It cleans up the member and reward it creates.
+- Every request has a saved example response.
+
+To run it against another address, change the `baseUrl` collection variable.
+
 | Resource | Endpoints |
 |---|---|
 | `/auth` | login, profile |
-| `/customers` | list, search, get, get by QR, point history, redemptions, register, PATCH, PUT, delete |
+| `/customers` | list, search, get, get by QR, point history, redemptions, register, open member card, resend card email, PATCH, PUT, delete |
 | `/rewards` | list, get, create, PUT, PATCH, delete |
 | `/point-transactions` | list, get, award points |
 | `/redemptions` | list, get, claim reward |
@@ -93,7 +117,7 @@ the Postman collection at `postman/EvercupPoints.postman_collection.json`.
 
 ### Access levels
 
-- **Public** — registering as a member, browsing the rewards catalog, login
+- **Public** — registering as a member, opening your own member card, browsing the rewards catalog, login
 - **Authenticated** — reading members, point history and redemptions
 - **Staff or Admin** — awarding points, claiming rewards
 - **Admin only** — editing or deleting members, managing rewards and staff accounts
@@ -133,5 +157,35 @@ balance change.
 **Point transactions and redemptions cannot be edited or deleted.** They are
 permanent records. A mistake is corrected by adding a new entry.
 
+**Members open their card with two things, not one.** `POST /customers/card`
+needs both the email and the member code from the QR. A wrong pair gets the same
+401 message whichever part was wrong. It is a POST so the email never appears in
+a URL.
+
+**New members get their card by email.** On sign-up the server draws the QR
+as a PNG and emails it through SMTP (Gmail works with an App Password, see
+`backend/.env.example`). A mail failure never undoes the sign-up: the response
+just says `"cardEmailed": false`. `POST /customers/card/resend` sends it again
+for a member who lost their code, and gives the same reply whether or not the
+email is registered.
+
+**History is never deleted out from under you.** A reward that has been claimed,
+or a staff account that has processed points, cannot be deleted. The API returns
+409 Conflict and says to retire or deactivate it instead (`PATCH isActive: false`).
+
+**Two requests at once are handled one at a time.** Awarding points and claiming
+a reward lock the member's row until they finish, so two claims at the same
+moment cannot both spend the same points. A receipt entered twice at the same
+instant gets 409, never a 500.
+
 **Password hashes never leave the server.** The staff service strips `passwordHash`
 from every response.
+
+**A token is only as good as the account behind it.** The JWT strategy re-checks
+the staff account on every request, so deactivating or deleting a staff member
+locks them out at once instead of when their token expires, and a role change
+applies immediately. An admin cannot delete, deactivate or demote their own
+account. The app refuses to start without `JWT_SECRET` in `.env`.
+
+**Bad query values are a 400, not a crash.** Every list endpoint validates
+`page` (from 1) and `limit` (1 to 100) before touching the database.
