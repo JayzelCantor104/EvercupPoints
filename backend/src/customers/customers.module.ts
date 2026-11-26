@@ -5,10 +5,12 @@ import { CustomersService } from './customers.service';
 import { CustomersController } from './customers.controller';
 import { PointTransactionsModule } from '../point-transactions/point-transactions.module';
 import { RedemptionsModule } from '../redemptions/redemptions.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Customer]),
+    MailModule,
     forwardRef(() => PointTransactionsModule),
     forwardRef(() => RedemptionsModule),
   ],

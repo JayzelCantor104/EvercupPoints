@@ -6,6 +6,9 @@ import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ReplaceCustomerDto } from './dto/replace-customer.dto';
+import { OpenCardDto } from './dto/open-card.dto';
+import { ResendCardDto } from './dto/resend-card.dto';
+import { ListQueryDto } from '../common/dto/list-query.dto';
 import { PointTransactionsService } from '../point-transactions/point-transactions.service';
 import { RedemptionsService } from '../redemptions/redemptions.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -23,12 +26,8 @@ export class CustomersController {
   // GET /customers?search=&page=
   @Get()
   @UseGuards(JwtAuthGuard)
-  findAll(
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-    @Query('search') search?: string,
-  ) {
-    return this.service.findAll(+page, +limit, search);
+  findAll(@Query() q: ListQueryDto) {
+    return this.service.findAll(q.page, q.limit, q.search);
   }
 
   // GET /customers/qr/:qrCode - used by the scan page
@@ -48,31 +47,38 @@ export class CustomersController {
   // GET /customers/:id/point-transactions
   @Get(':id/point-transactions')
   @UseGuards(JwtAuthGuard)
-  async history(
-    @Param('id', ParseIntPipe) id: number,
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-  ) {
+  async history(@Param('id', ParseIntPipe) id: number, @Query() q: ListQueryDto) {
     await this.service.findOne(id); // 404 if not found
-    return this.pointTransactions.findAll(+page, +limit, id);
+    return this.pointTransactions.findAll(q.page, q.limit, id);
   }
 
   // GET /customers/:id/redemptions
   @Get(':id/redemptions')
   @UseGuards(JwtAuthGuard)
-  async claims(
-    @Param('id', ParseIntPipe) id: number,
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-  ) {
+  async claims(@Param('id', ParseIntPipe) id: number, @Query() q: ListQueryDto) {
     await this.service.findOne(id);
-    return this.redemptions.findAll(+page, +limit, id);
+    return this.redemptions.findAll(q.page, q.limit, id);
   }
 
   // POST /customers - sign up (public)
   @Post()
   create(@Body() dto: CreateCustomerDto) {
     return this.service.create(dto);
+  }
+
+  // POST /customers/card - member opens their own card (public)
+  // POST so the email isn't in the url
+  @Post('card')
+  @HttpCode(200)
+  openCard(@Body() dto: OpenCardDto) {
+    return this.service.openCard(dto.email, dto.memberCode);
+  }
+
+  // POST /customers/card/resend - email the card again (public)
+  @Post('card/resend')
+  @HttpCode(202)
+  resendCard(@Body() dto: ResendCardDto) {
+    return this.service.resendCard(dto.email);
   }
 
   // PATCH /customers/:id (admin)
