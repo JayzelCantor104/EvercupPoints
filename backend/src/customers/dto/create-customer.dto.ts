@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateCustomerDto {
@@ -10,6 +11,8 @@ export class CreateCustomerDto {
   @IsEmail({}, { message: 'A valid email address is required.' })
   email: string;
 
+  // empty string from the form = not provided
+  @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value))
   @IsOptional() @IsString() @Length(7, 20)
   contactNumber?: string;
 }

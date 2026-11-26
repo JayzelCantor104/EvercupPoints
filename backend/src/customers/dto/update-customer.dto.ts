@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { IsEmail, IsOptional, IsString, Length } from 'class-validator';
 
 // for PATCH, all fields optional
@@ -11,6 +12,7 @@ export class UpdateCustomerDto {
   @IsOptional() @IsEmail()
   email?: string;
 
+  @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value))
   @IsOptional() @IsString() @Length(7, 20)
   contactNumber?: string;
 }
