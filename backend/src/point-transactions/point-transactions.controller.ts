@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { PointTransactionsService } from './point-transactions.service';
 import { CreatePointTransactionDto } from './dto/create-point-transaction.dto';
+import { ListQueryDto } from '../common/dto/list-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -15,12 +16,8 @@ export class PointTransactionsController {
 
   // GET /point-transactions
   @Get()
-  findAll(
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-    @Query('customerId') customerId?: string,
-  ) {
-    return this.service.findAll(+page, +limit, customerId ? +customerId : undefined);
+  findAll(@Query() q: ListQueryDto) {
+    return this.service.findAll(q.page, q.limit, q.customerId);
   }
 
   // GET /point-transactions/:id

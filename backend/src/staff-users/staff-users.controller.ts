@@ -1,10 +1,11 @@
 import {
   Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe,
-  Patch, Post, Query, UseGuards,
+  Patch, Post, Query, Req, UseGuards, BadRequestException,
 } from '@nestjs/common';
 import { StaffUsersService } from './staff-users.service';
 import { CreateStaffUserDto } from './dto/create-staff-user.dto';
 import { UpdateStaffUserDto } from './dto/update-staff-user.dto';
+import { ListQueryDto } from '../common/dto/list-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -18,12 +19,8 @@ export class StaffUsersController {
 
   // GET /staff-users
   @Get()
-  findAll(
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-    @Query('isActive') isActive?: string,
-  ) {
-    return this.service.findAll(+page, +limit, isActive);
+  findAll(@Query() q: ListQueryDto) {
+    return this.service.findAll(q.page, q.limit, q.isActive);
   }
 
   // GET /staff-users/:id
@@ -40,14 +37,20 @@ export class StaffUsersController {
 
   // PATCH /staff-users/:id
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStaffUserDto) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStaffUserDto, @Req() req: any) {
+    if (id === req.user.staffId && (dto.isActive === false || dto.role === 'Staff')) {
+      throw new BadRequestException('You cannot deactivate or demote your own account.');
+    }
     return this.service.update(id, dto);
   }
 
   // DELETE /staff-users/:id
   @Delete(':id')
   @HttpCode(204)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    if (id === req.user.staffId) {
+      throw new BadRequestException('You cannot delete your own account.');
+    }
     return this.service.remove(id);
   }
 }

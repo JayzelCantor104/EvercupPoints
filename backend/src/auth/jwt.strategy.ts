@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
+import { StaffUsersService } from '../staff-users/staff-users.service';
 
 export interface JwtPayload {
   sub: number;
@@ -11,20 +12,29 @@ export interface JwtPayload {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private staffUsers: StaffUsersService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get('JWT_SECRET', 'dev_secret_change_me'),
+      // no default secret, it has to be in .env
+      secretOrKey: config.getOrThrow<string>('JWT_SECRET'),
     });
   }
 
-  // Whatever this returns becomes request.user on a protected route.
+  // runs after the token is verified, whatever we return becomes req.user
+  // checks the db so deactivated staff can't keep using an old token
   async validate(payload: JwtPayload) {
+    const staff = await this.staffUsers.findActiveById(payload.sub);
+    if (!staff) {
+      throw new UnauthorizedException('This account is no longer active. Please contact the admin.');
+    }
     return {
-      staffId: payload.sub,
-      username: payload.username,
-      role: payload.role,
+      staffId: staff.staffId,
+      username: staff.username,
+      role: staff.role,
     };
   }
 }

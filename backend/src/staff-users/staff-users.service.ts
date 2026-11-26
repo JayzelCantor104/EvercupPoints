@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { StaffUser } from './staff-user.entity';
+import { PointTransaction } from '../point-transactions/point-transaction.entity';
+import { Redemption } from '../redemptions/redemption.entity';
 import { CreateStaffUserDto } from './dto/create-staff-user.dto';
 import { UpdateStaffUserDto } from './dto/update-staff-user.dto';
 
@@ -22,6 +24,11 @@ export class StaffUsersService {
   // for login only, keeps the hash for bcrypt.compare
   findByUsername(username: string) {
     return this.repo.findOne({ where: { username } });
+  }
+
+  // used by JwtStrategy
+  findActiveById(staffId: number) {
+    return this.repo.findOne({ where: { staffId, isActive: true } });
   }
 
   async findAll(page = 1, limit = 20, isActive?: string) {
@@ -76,6 +83,18 @@ export class StaffUsersService {
   async remove(id: number) {
     const staff = await this.repo.findOne({ where: { staffId: id } });
     if (!staff) throw new NotFoundException(`No staff account exists with ID ${id}.`);
+
+    // staff with history should be deactivated instead
+    const [awards, claims] = await Promise.all([
+      this.repo.manager.count(PointTransaction, { where: { staffId: id } }),
+      this.repo.manager.count(Redemption, { where: { staffId: id } }),
+    ]);
+    if (awards + claims > 0) {
+      throw new ConflictException(
+        `${staff.username} has processed ${awards} point award(s) and ${claims} claim(s), so the account cannot be deleted. ` +
+          'Deactivate it instead (PATCH isActive: false) to block their login.',
+      );
+    }
     await this.repo.remove(staff);
   }
 }

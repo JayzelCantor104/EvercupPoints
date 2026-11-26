@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { RedemptionsService } from './redemptions.service';
 import { CreateRedemptionDto } from './dto/create-redemption.dto';
+import { ListQueryDto } from '../common/dto/list-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -14,12 +15,8 @@ export class RedemptionsController {
 
   // GET /redemptions
   @Get()
-  findAll(
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-    @Query('customerId') customerId?: string,
-  ) {
-    return this.service.findAll(+page, +limit, customerId ? +customerId : undefined);
+  findAll(@Query() q: ListQueryDto) {
+    return this.service.findAll(q.page, q.limit, q.customerId);
   }
 
   // GET /redemptions/:id

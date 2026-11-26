@@ -6,6 +6,7 @@ import { RewardsService } from './rewards.service';
 import { CreateRewardDto } from './dto/create-reward.dto';
 import { UpdateRewardDto } from './dto/update-reward.dto';
 import { ReplaceRewardDto } from './dto/replace-reward.dto';
+import { ListQueryDto } from '../common/dto/list-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -16,12 +17,8 @@ export class RewardsController {
 
   // GET /rewards?isActive= (public)
   @Get()
-  findAll(
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-    @Query('isActive') isActive?: string,
-  ) {
-    return this.service.findAll(+page, +limit, isActive);
+  findAll(@Query() q: ListQueryDto) {
+    return this.service.findAll(q.page, q.limit, q.isActive);
   }
 
   // GET /rewards/:id (public)
