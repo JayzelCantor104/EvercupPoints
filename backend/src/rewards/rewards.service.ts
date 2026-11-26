@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Reward } from './reward.entity';
+import { Redemption } from '../redemptions/redemption.entity';
 import { CreateRewardDto } from './dto/create-reward.dto';
 import { UpdateRewardDto } from './dto/update-reward.dto';
 import { ReplaceRewardDto } from './dto/replace-reward.dto';
@@ -54,6 +55,15 @@ export class RewardsService {
 
   async remove(id: number) {
     const reward = await this.findOne(id);
+
+    // can't delete a reward that was already claimed
+    const timesClaimed = await this.repo.manager.count(Redemption, { where: { rewardId: id } });
+    if (timesClaimed > 0) {
+      throw new ConflictException(
+        `${reward.rewardName} has been claimed ${timesClaimed} time(s), so it cannot be deleted. ` +
+          'Retire it instead (PATCH isActive: false) to take it off the menu.',
+      );
+    }
     await this.repo.remove(reward);
   }
 }

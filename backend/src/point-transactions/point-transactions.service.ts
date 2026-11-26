@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { PointTransaction } from './point-transaction.entity';
 import { Customer } from '../customers/customer.entity';
 import { CreatePointTransactionDto } from './dto/create-point-transaction.dto';
@@ -38,38 +38,48 @@ export class PointTransactionsService {
   // add points for a purchase
   // in a transaction so the record and the balance save together
   async create(dto: CreatePointTransactionDto, staffId: number) {
-    const duplicate = await this.repo.findOne({
-      where: { receiptNumber: dto.receiptNumber },
-    });
-    if (duplicate) {
-      throw new ConflictException(
-        `Points for receipt ${dto.receiptNumber} were already awarded.`,
-      );
-    }
+    const alreadyClaimed = () =>
+      new ConflictException(`Points for receipt ${dto.receiptNumber} were already awarded.`);
 
-    return this.dataSource.transaction(async (manager) => {
-      const customer = await manager.findOne(Customer, {
-        where: { customerId: dto.customerId },
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        // lock the customer row so two requests can't change the balance at the same time
+        const customer = await manager.findOne(Customer, {
+          where: { customerId: dto.customerId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!customer) {
+          throw new NotFoundException(`No customer exists with ID ${dto.customerId}.`);
+        }
+
+        const duplicate = await manager.findOne(PointTransaction, {
+          where: { receiptNumber: dto.receiptNumber },
+        });
+        if (duplicate) throw alreadyClaimed();
+
+        const pointsEarned = Math.floor(dto.purchaseAmount / PESOS_PER_POINT);
+
+        const saved = await manager.save(
+          manager.create(PointTransaction, {
+            customerId: dto.customerId,
+            staffId,
+            receiptNumber: dto.receiptNumber,
+            purchaseAmount: dto.purchaseAmount,
+            pointsEarned,
+          }),
+        );
+
+        customer.pointsBalance += pointsEarned;
+        await manager.save(customer);
+
+        return saved;
       });
-      if (!customer) {
-        throw new NotFoundException(`No customer exists with ID ${dto.customerId}.`);
+    } catch (err) {
+      // same receipt sent twice at the same time
+      if (err instanceof QueryFailedError && (err as any).driverError?.code === 'ER_DUP_ENTRY') {
+        throw alreadyClaimed();
       }
-
-      const pointsEarned = Math.floor(dto.purchaseAmount / PESOS_PER_POINT);
-
-      const tx = manager.create(PointTransaction, {
-        customerId: dto.customerId,
-        staffId,
-        receiptNumber: dto.receiptNumber,
-        purchaseAmount: dto.purchaseAmount,
-        pointsEarned,
-      });
-      const saved = await manager.save(tx);
-
-      customer.pointsBalance += pointsEarned;
-      await manager.save(customer);
-
-      return saved;
-    });
+      throw err;
+    }
   }
 }

@@ -36,8 +36,10 @@ export class RedemptionsService {
   // claim a reward and deduct the points in one transaction
   async create(dto: CreateRedemptionDto, staffId: number) {
     return this.dataSource.transaction(async (manager) => {
+      // lock the row so two claims can't use the same points
       const customer = await manager.findOne(Customer, {
         where: { customerId: dto.customerId },
+        lock: { mode: 'pessimistic_write' },
       });
       if (!customer) {
         throw new NotFoundException(`No customer exists with ID ${dto.customerId}.`);
