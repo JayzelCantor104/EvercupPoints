@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "EvercupPoints API",
-    "description": "EvercupPoints - Coffee Shop Loyalty Membership Web Portal.\nRun 'Login' first: it saves the JWT into {{token}}, which every other request uses.",
+    "description": "Coffee shop loyalty membership API (NestJS + TypeORM + MySQL + JWT).\n\nRun the whole collection top to bottom with the Collection Runner: each request saves the IDs it creates (customerId, qrCode, rewardId, transactionId, redemptionId, staffId) for the requests after it, and every request has tests for its status code. A fresh run id keeps receipts, emails and usernames unique, so it can be re-run on the same database.\n\nBefore the first run: `npm run seed` in backend (creates the admin account).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -14,6 +14,25 @@
       }
     ]
   },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Runs after every request: errors must use the Standard Error Response format.",
+          "if (pm.response.code >= 400) {",
+          "  pm.test(\"Standard error format\", () => {",
+          "    const b = pm.response.json();",
+          "    pm.expect(b.success).to.eql(false);",
+          "    pm.expect(b.statusCode).to.eql(pm.response.code);",
+          "    pm.expect(b).to.include.keys(\"message\", \"errors\", \"timestamp\");",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
   "variable": [
     {
       "key": "baseUrl",
@@ -22,14 +41,80 @@
     {
       "key": "token",
       "value": ""
+    },
+    {
+      "key": "staffToken",
+      "value": ""
+    },
+    {
+      "key": "adminId",
+      "value": ""
+    },
+    {
+      "key": "runId",
+      "value": ""
+    },
+    {
+      "key": "customerId",
+      "value": ""
+    },
+    {
+      "key": "qrCode",
+      "value": ""
+    },
+    {
+      "key": "memberEmail",
+      "value": ""
+    },
+    {
+      "key": "rewardId",
+      "value": ""
+    },
+    {
+      "key": "transactionId",
+      "value": ""
+    },
+    {
+      "key": "redemptionId",
+      "value": ""
+    },
+    {
+      "key": "staffId",
+      "value": ""
     }
   ],
   "item": [
     {
-      "name": "Auth",
+      "name": "1. Auth",
+      "description": "Login issues a JWT. Every protected route needs it as `Authorization: Bearer <token>`.",
       "item": [
         {
-          "name": "1. Login (saves token)",
+          "name": "Login as admin (saves token)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"runId\", String(Date.now()).slice(-7));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Returns a JWT\", () => pm.expect(b.token.split(\".\")).to.have.length(3));",
+                  "pm.test(\"Never returns the password hash\", () => pm.expect(b).to.not.have.property(\"passwordHash\"));",
+                  "pm.collectionVariables.set(\"token\", b.token);",
+                  "pm.collectionVariables.set(\"adminId\", b.staffId);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -48,7 +133,7 @@
                 "login"
               ]
             },
-            "description": "Logs in and automatically saves the JWT into the {{token}} variable.",
+            "description": "Public. Returns the staff profile and a signed JWT. The test saves it to {{token}}, which the whole collection uses. Also starts a new run id so receipts and emails never collide with an earlier run.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}",
@@ -62,25 +147,65 @@
               "type": "noauth"
             }
           },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"staffId\": 1,\n  \"username\": \"admin\",\n  \"fullName\": \"Jayzel Cantor\",\n  \"role\": \"Admin\",\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<payload>.<signature>\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get my profile",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.token) {",
-                  "  pm.collectionVariables.set('token', body.token);",
-                  "  console.log('Token saved');",
-                  "}",
-                  "pm.test('login returns 201', () => pm.response.to.have.status(201));"
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Role is Admin\", () => pm.expect(pm.response.json().role).to.eql(\"Admin\"));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "2. Get profile",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -94,11 +219,52 @@
                 "profile"
               ]
             },
-            "description": "Proves the token works. Returns the logged-in user."
-          }
+            "description": "Authenticated. Shows who the token belongs to."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/profile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "profile"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"staffId\": 1,\n  \"username\": \"admin\",\n  \"role\": \"Admin\"\n}"
+            }
+          ]
         },
         {
-          "name": "Login - wrong password (401)",
+          "name": "Login with wrong password (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -117,10 +283,10 @@
                 "login"
               ]
             },
-            "description": "Shows a failed authentication returning 401 Unauthorized.",
+            "description": "Same message whether the username or the password is wrong, so usernames cannot be discovered.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"wrongpassword\"\n}",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"wrong-password\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -130,15 +296,677 @@
             "auth": {
               "type": "noauth"
             }
-          }
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"wrong-password\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 401,\n  \"message\": \"Invalid username or password.\",\n  \"errors\": [\n    \"Invalid username or password.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:16.763Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Protected route without a token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "No Authorization header: JwtAuthGuard rejects the request before the controller runs.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\",\n  \"errors\": [\n    \"Unauthorized\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:16.859Z\"\n}"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "Customers",
+      "name": "2. Customers",
+      "description": "Loyalty members. Registering and opening your own card are public; reading is for any staff; editing and deleting is Admin only.",
       "item": [
         {
-          "name": "3. List customers",
+          "name": "Register a customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"QR member code issued\", () => pm.expect(b.qrCode).to.match(/^EVC-\\d{4}-[0-9A-F]{4}$/));",
+                  "pm.test(\"Starts at 0 points\", () => pm.expect(b.pointsBalance).to.eql(0));",
+                  "pm.collectionVariables.set(\"customerId\", b.customerId);",
+                  "pm.collectionVariables.set(\"qrCode\", b.qrCode);",
+                  "pm.collectionVariables.set(\"memberEmail\", b.email);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "Public. The server generates the customer ID, the QR member code and the starting balance of 0. Emails the QR card when MAIL_* is set in .env (reserved test domains like example.com are skipped), and reports it in cardEmailed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.{{runId}}@example.com\",\n  \"contactNumber\": \"09171234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\",\n  \"qrCode\": \"EVC-0001-0334\",\n  \"pointsBalance\": 0,\n  \"customerId\": 1,\n  \"dateRegistered\": \"2026-11-26T17:12:16.970Z\",\n  \"cardEmailed\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Register with an email already in use (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Copy\",\n  \"email\": \"{{memberEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "409 Conflict",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Copy\",\n  \"email\": \"ana.3136107@example.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 409,\n  \"message\": \"A customer with the email ana.3136107@example.com already exists.\",\n  \"errors\": [\n    \"A customer with the email ana.3136107@example.com already exists.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:17.096Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Register with invalid data (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Lists each validation problem\", () => pm.expect(pm.response.json().errors.length).to.be.above(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "class-validator rejects the body. Every problem is listed in errors[].",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"\",\n  \"lastName\": \"Santos\",\n  \"email\": \"not-an-email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"\",\n  \"lastName\": \"Santos\",\n  \"email\": \"not-an-email\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 400,\n  \"message\": \"Validation failed.\",\n  \"errors\": [\n    \"firstName must be longer than or equal to 1 characters\",\n    \"firstName should not be empty\",\n    \"A valid email address is required.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:17.196Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Open member card (customer profile)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Has member, visits, claims and menu\", () => pm.expect(pm.response.json()).to.include.keys(\"member\", \"visits\", \"claims\", \"menu\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers/card",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "card"
+              ]
+            },
+            "description": "Public. A member opens their own card with their email AND member code. Returns balance, recent visits, rewards claimed and the active reward menu. POST keeps the email out of the URL.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"memberCode\": \"{{qrCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/card",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "card"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ana.3136107@example.com\",\n  \"memberCode\": \"EVC-0001-0334\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"member\": {\n    \"customerId\": 1,\n    \"firstName\": \"Ana\",\n    \"lastName\": \"Santos\",\n    \"email\": \"ana.3136107@example.com\",\n    \"contactNumber\": \"09171234567\",\n    \"qrCode\": \"EVC-0001-0334\",\n    \"pointsBalance\": 0,\n    \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n  },\n  \"visits\": [],\n  \"claims\": [],\n  \"menu\": [\n    {\n      \"rewardId\": 1,\n      \"rewardName\": \"Free Brewed Coffee\",\n      \"description\": \"One regular-size brewed coffee\",\n      \"pointsRequired\": 50\n    },\n    {\n      \"rewardId\": 3,\n      \"rewardName\": \"Free Croissant\",\n      \"description\": \"One butter croissant\",\n      \"pointsRequired\": 75\n    },\n    {\n      \"rewardId\": 2,\n      \"rewardName\": \"Free Specialty Latte\",\n      \"description\": \"One 16oz specialty latte of choice\",\n      \"pointsRequired\": 100\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Open member card with wrong code (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers/card",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "card"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"memberCode\": \"EVC-0000-0000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/card",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "card"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ana.3136107@example.com\",\n  \"memberCode\": \"EVC-0000-0000\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 401,\n  \"message\": \"That email and member code do not match any EvercupPoints card.\",\n  \"errors\": [\n    \"That email and member code do not match any EvercupPoints card.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:17.419Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Resend member card email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers/card/resend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "card",
+                "resend"
+              ]
+            },
+            "description": "Public. For a member who lost their code. Same reply whether or not the email is registered.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{memberEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/card/resend",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "card",
+                    "resend"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ana.3136107@example.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"message\": \"Email is not set up on this server yet. Ask the staff at the counter for your member code.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List customers (paged)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Paged response\", () => pm.expect(b).to.include.keys(\"page\", \"limit\", \"total\", \"data\"));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -162,15 +990,56 @@
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"data\": [\n    {\n      \"customerId\": 1,\n      \"firstName\": \"Ana\",\n      \"lastName\": \"Santos\",\n      \"email\": \"ana.3136107@example.com\",\n      \"contactNumber\": \"09171234567\",\n      \"qrCode\": \"EVC-0001-0334\",\n      \"pointsBalance\": 0,\n      \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "4. Search customers",
+          "name": "Search customers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Finds the new member\", () => pm.expect(pm.response.json().data.map(c => c.customerId)).to.include(Number(pm.collectionVariables.get(\"customerId\"))));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/customers?search=santos&page=1",
+              "raw": "{{baseUrl}}/customers?search=santos",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -181,127 +1050,301 @@
                 {
                   "key": "search",
                   "value": "santos"
-                },
-                {
-                  "key": "page",
-                  "value": "1"
                 }
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers?search=santos",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"data\": [\n    {\n      \"customerId\": 1,\n      \"firstName\": \"Ana\",\n      \"lastName\": \"Santos\",\n      \"email\": \"ana.3136107@example.com\",\n      \"contactNumber\": \"09171234567\",\n      \"qrCode\": \"EVC-0001-0334\",\n      \"pointsBalance\": 0,\n      \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "5. Get customer by ID",
+          "name": "List with bad paging (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/customers/1",
+              "raw": "{{baseUrl}}/customers?page=0&limit=500",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "limit",
+                  "value": "500"
+                }
+              ]
+            },
+            "description": "page starts at 1 and limit is capped at 100."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers?page=0&limit=500",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 400,\n  \"message\": \"Validation failed.\",\n  \"errors\": [\n    \"page starts at 1.\",\n    \"limit can be at most 100.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:17.812Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get customer by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "customers",
-                "1"
+                "{{customerId}}"
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\",\n  \"qrCode\": \"EVC-0001-0334\",\n  \"pointsBalance\": 0,\n  \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "6. Get customer by QR code",
+          "name": "Get customer by QR code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/customers/qr/EVC-0001-7F3A",
+              "raw": "{{baseUrl}}/customers/qr/{{qrCode}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "customers",
                 "qr",
-                "EVC-0001-7F3A"
+                "{{qrCode}}"
               ]
             },
-            "description": "Used by the staff scanner page after a QR is decoded."
-          }
-        },
-        {
-          "name": "7. Customer point history",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/customers/1/point-transactions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "customers",
-                "1",
-                "point-transactions"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "8. Customer redemptions",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/customers/1/redemptions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "customers",
-                "1",
-                "redemptions"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "9. Register a customer",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/customers",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "customers"
-              ]
-            },
-            "description": "Public. The server generates the customer ID, QR code and starting balance.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Cruz\",\n  \"email\": \"ana.cruz@email.com\",\n  \"contactNumber\": \"09391234567\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
+            "description": "What the scanner page calls after reading a member's QR."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/qr/EVC-0001-0334",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "qr",
+                    "EVC-0001-0334"
+                  ]
                 }
-              }
-            },
-            "auth": {
-              "type": "noauth"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\",\n  \"qrCode\": \"EVC-0001-0334\",\n  \"pointsBalance\": 0,\n  \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n}"
             }
-          }
+          ]
         },
         {
-          "name": "10. Update customer (PATCH)",
+          "name": "Get customer that does not exist (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "999999"
+              ]
+            },
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/999999",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "999999"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 404,\n  \"message\": \"No customer exists with ID 999999.\",\n  \"errors\": [\n    \"No customer exists with ID 999999.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:18.112Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update customer (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Contact number changed\", () => pm.expect(pm.response.json().contactNumber).to.eql(\"09998887777\"));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PATCH",
             "header": [
@@ -311,29 +1354,84 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/customers/1",
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "customers",
-                "1"
+                "{{customerId}}"
               ]
             },
-            "description": "Admin only. Changes just one field and leaves the rest alone.",
+            "description": "Admin only. Partial update: only the fields sent are changed.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"contactNumber\": \"09181119999\"\n}",
+              "raw": "{\n  \"contactNumber\": \"09998887777\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contactNumber\": \"09998887777\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"firstName\": \"Ana\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09998887777\",\n  \"qrCode\": \"EVC-0001-0334\",\n  \"pointsBalance\": 0,\n  \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "11. Replace customer (PUT)",
+          "name": "Replace customer (PUT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PUT",
             "header": [
@@ -343,72 +1441,90 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/customers/1",
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "customers",
-                "1"
+                "{{customerId}}"
               ]
             },
-            "description": "Admin only. Full replacement, so every editable field is required.",
+            "description": "Admin only. Full replacement: every editable field is required.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstName\": \"Maria\",\n  \"lastName\": \"Santos\",\n  \"email\": \"maria.santos@email.com\",\n  \"contactNumber\": \"09181119999\"\n}",
+              "raw": "{\n  \"firstName\": \"Ana Marie\",\n  \"lastName\": \"Santos\",\n  \"email\": \"{{memberEmail}}\",\n  \"contactNumber\": \"09171234567\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
-        },
-        {
-          "name": "12. Delete customer",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/customers/1",
-              "host": [
-                "{{baseUrl}}"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"Ana Marie\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
               ],
-              "path": [
-                "customers",
-                "1"
-              ]
-            },
-            "description": "Admin only. Returns 204 No Content."
-          }
-        },
-        {
-          "name": "Protected route without token (401)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/customers",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "customers"
-              ]
-            },
-            "description": "Shows a protected route being correctly rejected with 401.",
-            "auth": {
-              "type": "noauth"
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"firstName\": \"Ana Marie\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\",\n  \"qrCode\": \"EVC-0001-0334\",\n  \"pointsBalance\": 0,\n  \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n}"
             }
-          }
+          ]
         }
       ]
     },
     {
-      "name": "Rewards",
+      "name": "3. Rewards",
+      "description": "The rewards catalog. Browsing is public; changes are Admin only.",
       "item": [
         {
-          "name": "13. List rewards",
+          "name": "List rewards",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -421,14 +1537,55 @@
                 "rewards"
               ]
             },
-            "description": "Public.",
+            "description": "",
             "auth": {
               "type": "noauth"
             }
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 3,\n  \"data\": [\n    {\n      \"rewardId\": 1,\n      \"rewardName\": \"Free Brewed Coffee\",\n      \"description\": \"One regular-size brewed coffee\",\n      \"pointsRequired\": 50,\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.408Z\"\n    },\n    {\n      \"rewardId\": 3,\n      \"rewardName\": \"Free Croissant\",\n      \"description\": \"One butter croissant\",\n      \"pointsRequired\": 75,\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.423Z\"\n    },\n    {\n      \"rewardId\": 2,\n      \"rewardName\": \"Free Specialty Latte\",\n      \"description\": \"One 16oz specialty latte of choice\",\n      \"pointsRequired\": 100,\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.415Z\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "14. List active rewards only",
+          "name": "List active rewards only",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Only active rewards\", () => pm.response.json().data.forEach(r => pm.expect(r.isActive).to.eql(true)));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -451,31 +1608,51 @@
             "auth": {
               "type": "noauth"
             }
-          }
-        },
-        {
-          "name": "15. Get reward by ID",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/rewards/1",
-              "host": [
-                "{{baseUrl}}"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards?isActive=true",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
               ],
-              "path": [
-                "rewards",
-                "1"
-              ]
-            },
-            "description": "",
-            "auth": {
-              "type": "noauth"
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 3,\n  \"data\": [\n    {\n      \"rewardId\": 1,\n      \"rewardName\": \"Free Brewed Coffee\",\n      \"description\": \"One regular-size brewed coffee\",\n      \"pointsRequired\": 50,\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.408Z\"\n    },\n    {\n      \"rewardId\": 3,\n      \"rewardName\": \"Free Croissant\",\n      \"description\": \"One butter croissant\",\n      \"pointsRequired\": 75,\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.423Z\"\n    },\n    {\n      \"rewardId\": 2,\n      \"rewardName\": \"Free Specialty Latte\",\n      \"description\": \"One 16oz specialty latte of choice\",\n      \"pointsRequired\": 100,\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.415Z\"\n    }\n  ]\n}"
             }
-          }
+          ]
         },
         {
-          "name": "16. Create reward",
+          "name": "Create reward",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"rewardId\", pm.response.json().rewardId);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -493,20 +1670,221 @@
                 "rewards"
               ]
             },
-            "description": "Admin only.",
+            "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"rewardName\": \"Free Croissant\",\n  \"description\": \"One butter croissant\",\n  \"pointsRequired\": 75,\n  \"isActive\": true\n}",
+              "raw": "{\n  \"rewardName\": \"Free Iced Americano {{runId}}\",\n  \"description\": \"One 16oz iced americano\",\n  \"pointsRequired\": 10\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano\",\n  \"pointsRequired\": 10\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano\",\n  \"pointsRequired\": 10,\n  \"isActive\": true,\n  \"rewardId\": 4,\n  \"dateCreated\": \"2026-11-26T17:12:18.632Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "17. Replace reward (PUT)",
+          "name": "Create reward with 0 points (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rewards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rewardName\": \"Broken Reward\",\n  \"pointsRequired\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rewardName\": \"Broken Reward\",\n  \"pointsRequired\": 0\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 400,\n  \"message\": \"Validation failed.\",\n  \"errors\": [\n    \"pointsRequired must be greater than 0.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:18.709Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get reward by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards",
+                "{{rewardId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"rewardId\": 4,\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano\",\n  \"pointsRequired\": 10,\n  \"isActive\": true,\n  \"dateCreated\": \"2026-11-26T17:12:18.632Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Replace reward (PUT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PUT",
             "header": [
@@ -516,29 +1894,84 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/rewards/1",
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "rewards",
-                "1"
+                "{{rewardId}}"
               ]
             },
-            "description": "Admin only.",
+            "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"rewardName\": \"Free Specialty Latte\",\n  \"description\": \"One 16oz latte, hot or iced\",\n  \"pointsRequired\": 120,\n  \"isActive\": true\n}",
+              "raw": "{\n  \"rewardName\": \"Free Iced Americano {{runId}}\",\n  \"description\": \"One 16oz iced americano, any milk\",\n  \"pointsRequired\": 20,\n  \"isActive\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano, any milk\",\n  \"pointsRequired\": 20,\n  \"isActive\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"rewardId\": 4,\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano, any milk\",\n  \"pointsRequired\": 20,\n  \"isActive\": true,\n  \"dateCreated\": \"2026-11-26T17:12:18.632Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "18. Update reward (PATCH)",
+          "name": "Update reward (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PATCH",
             "header": [
@@ -548,47 +1981,93 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/rewards/1",
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "rewards",
-                "1"
+                "{{rewardId}}"
               ]
             },
-            "description": "Admin only.",
+            "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"pointsRequired\": 110\n}",
+              "raw": "{\n  \"description\": \"One 16oz iced americano, oat milk available\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
-        },
-        {
-          "name": "19. Delete reward",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/rewards/1",
-              "host": [
-                "{{baseUrl}}"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"description\": \"One 16oz iced americano, oat milk available\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
               ],
-              "path": [
-                "rewards",
-                "1"
-              ]
-            },
-            "description": "Admin only."
-          }
-        },
+              "cookie": [],
+              "body": "{\n  \"rewardId\": 4,\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano, oat milk available\",\n  \"pointsRequired\": 20,\n  \"isActive\": true,\n  \"dateCreated\": \"2026-11-26T17:12:18.632Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Point Transactions",
+      "description": "Points earned per purchase. Create and read only: a transaction is a permanent record.",
+      "item": [
         {
-          "name": "Create reward with 0 points (400)",
+          "name": "Award points for a purchase",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"250 pesos earns 25 points\", () => pm.expect(b.pointsEarned).to.eql(25));",
+                  "pm.collectionVariables.set(\"transactionId\", b.transactionId);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -598,33 +2077,252 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/rewards",
+              "raw": "{{baseUrl}}/point-transactions",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "rewards"
+                "point-transactions"
               ]
             },
-            "description": "Shows input validation rejecting a bad value.",
+            "description": "Staff or Admin. The client sends the amount; the server calculates the points (1 per 10 pesos). StaffID comes from the token, not the body.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"rewardName\": \"Invalid\",\n  \"pointsRequired\": 0\n}",
+              "raw": "{\n  \"customerId\": {{customerId}},\n  \"receiptNumber\": \"OR-{{runId}}-01\",\n  \"purchaseAmount\": 250\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Point Transactions",
-      "item": [
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"receiptNumber\": \"OR-3136107-01\",\n  \"purchaseAmount\": 250\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"staffId\": 1,\n  \"receiptNumber\": \"OR-3136107-01\",\n  \"purchaseAmount\": 250,\n  \"pointsEarned\": 25,\n  \"transactionId\": 1,\n  \"transactionDate\": \"2026-11-26T17:12:19.111Z\"\n}"
+            }
+          ]
+        },
         {
-          "name": "20. List point transactions",
+          "name": "Award the same receipt again (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/point-transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "point-transactions"
+              ]
+            },
+            "description": "ReceiptNumber is UNIQUE, so one purchase can never earn points twice.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": {{customerId}},\n  \"receiptNumber\": \"OR-{{runId}}-01\",\n  \"purchaseAmount\": 250\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "409 Conflict",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"receiptNumber\": \"OR-3136107-01\",\n  \"purchaseAmount\": 250\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 409,\n  \"message\": \"Points for receipt OR-3136107-01 were already awarded.\",\n  \"errors\": [\n    \"Points for receipt OR-3136107-01 were already awarded.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:19.230Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Award points with invalid amount (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/point-transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "point-transactions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": {{customerId}},\n  \"receiptNumber\": \"OR-{{runId}}-02\",\n  \"purchaseAmount\": -50\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"receiptNumber\": \"OR-3136107-02\",\n  \"purchaseAmount\": -50\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 400,\n  \"message\": \"Validation failed.\",\n  \"errors\": [\n    \"purchaseAmount must be greater than 0.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:19.339Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List point transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -648,95 +2346,350 @@
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"data\": [\n    {\n      \"transactionId\": 1,\n      \"customerId\": 1,\n      \"staffId\": 1,\n      \"receiptNumber\": \"OR-3136107-01\",\n      \"purchaseAmount\": \"250.00\",\n      \"pointsEarned\": 25,\n      \"transactionDate\": \"2026-11-26T17:12:19.111Z\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "21. Get transaction by ID",
+          "name": "Get transaction by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/point-transactions/1",
+              "raw": "{{baseUrl}}/point-transactions/{{transactionId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "point-transactions",
-                "1"
+                "{{transactionId}}"
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions",
+                    "1"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"transactionId\": 1,\n  \"customerId\": 1,\n  \"staffId\": 1,\n  \"receiptNumber\": \"OR-3136107-01\",\n  \"purchaseAmount\": \"250.00\",\n  \"pointsEarned\": 25,\n  \"transactionDate\": \"2026-11-26T17:12:19.111Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "22. Award points",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+          "name": "Customer point history",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Shows the award\", () => pm.expect(pm.response.json().total).to.eql(1));"
+                ]
               }
-            ],
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/point-transactions",
+              "raw": "{{baseUrl}}/customers/{{customerId}}/point-transactions",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "customers",
+                "{{customerId}}",
                 "point-transactions"
               ]
             },
-            "description": "Staff or Admin. Points are calculated by the server and staffId comes from the token.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"customerId\": 1,\n  \"receiptNumber\": \"OR-2026-004901\",\n  \"purchaseAmount\": 250.0\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1/point-transactions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1",
+                    "point-transactions"
+                  ]
                 }
-              }
-            }
-          }
-        },
-        {
-          "name": "Award points - duplicate receipt (409)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/point-transactions",
-              "host": [
-                "{{baseUrl}}"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
               ],
-              "path": [
-                "point-transactions"
-              ]
-            },
-            "description": "Run this right after the request above. The UNIQUE rule on ReceiptNumber stops the same receipt being claimed twice.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"customerId\": 1,\n  \"receiptNumber\": \"OR-2026-004901\",\n  \"purchaseAmount\": 250.0\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"data\": [\n    {\n      \"transactionId\": 1,\n      \"customerId\": 1,\n      \"staffId\": 1,\n      \"receiptNumber\": \"OR-3136107-01\",\n      \"purchaseAmount\": \"250.00\",\n      \"pointsEarned\": 25,\n      \"transactionDate\": \"2026-11-26T17:12:19.111Z\"\n    }\n  ]\n}"
             }
-          }
+          ]
         }
       ]
     },
     {
-      "name": "Redemptions",
+      "name": "5. Redemptions",
+      "description": "Rewards claimed with points. Create and read only.",
       "item": [
         {
-          "name": "23. List redemptions",
+          "name": "Claim a reward",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"20 points used\", () => pm.expect(b.pointsUsed).to.eql(20));",
+                  "pm.collectionVariables.set(\"redemptionId\", b.redemptionId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/redemptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "redemptions"
+              ]
+            },
+            "description": "Staff or Admin. Deducts the reward's points inside one database transaction, with the member's row locked.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": {{customerId}},\n  \"rewardId\": {{rewardId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/redemptions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "redemptions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"rewardId\": 4\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"rewardId\": 4,\n  \"staffId\": 1,\n  \"pointsUsed\": 20,\n  \"redemptionId\": 1,\n  \"redemptionDate\": \"2026-11-26T17:12:19.724Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Claim without enough points (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/redemptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "redemptions"
+              ]
+            },
+            "description": "The member now has 5 points and the reward needs 20.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": {{customerId}},\n  \"rewardId\": {{rewardId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/redemptions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "redemptions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"rewardId\": 4\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 400,\n  \"message\": \"Customer 1 has 5 points but the reward requires 20.\",\n  \"errors\": [\n    \"Customer 1 has 5 points but the reward requires 20.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:19.835Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List redemptions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -760,64 +2713,237 @@
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/redemptions?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "redemptions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"data\": [\n    {\n      \"redemptionId\": 1,\n      \"customerId\": 1,\n      \"rewardId\": 4,\n      \"staffId\": 1,\n      \"pointsUsed\": 20,\n      \"redemptionDate\": \"2026-11-26T17:12:19.724Z\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "24. Get redemption by ID",
+          "name": "Get redemption by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/redemptions/1",
+              "raw": "{{baseUrl}}/redemptions/{{redemptionId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "redemptions",
-                "1"
+                "{{redemptionId}}"
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/redemptions/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "redemptions",
+                    "1"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"redemptionId\": 1,\n  \"customerId\": 1,\n  \"rewardId\": 4,\n  \"staffId\": 1,\n  \"pointsUsed\": 20,\n  \"redemptionDate\": \"2026-11-26T17:12:19.724Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "25. Claim a reward",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+          "name": "Customer redemptions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
               }
-            ],
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/redemptions",
+              "raw": "{{baseUrl}}/customers/{{customerId}}/redemptions",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "customers",
+                "{{customerId}}",
                 "redemptions"
               ]
             },
-            "description": "Staff or Admin. Deducts the points inside a database transaction.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"customerId\": 1,\n  \"rewardId\": 1\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1/redemptions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1",
+                    "redemptions"
+                  ]
                 }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"data\": [\n    {\n      \"redemptionId\": 1,\n      \"customerId\": 1,\n      \"rewardId\": 4,\n      \"staffId\": 1,\n      \"pointsUsed\": 20,\n      \"redemptionDate\": \"2026-11-26T17:12:19.724Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Customer balance after the claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"25 earned - 20 claimed = 5\", () => pm.expect(pm.response.json().pointsBalance).to.eql(5));"
+                ]
               }
             }
-          }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{customerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"firstName\": \"Ana Marie\",\n  \"lastName\": \"Santos\",\n  \"email\": \"ana.3136107@example.com\",\n  \"contactNumber\": \"09171234567\",\n  \"qrCode\": \"EVC-0001-0334\",\n  \"pointsBalance\": 5,\n  \"dateRegistered\": \"2026-11-26T17:12:16.970Z\"\n}"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "Staff Users (Admin only)",
+      "name": "6. Staff Users & Roles",
+      "description": "Admin only. Also shows role-based access (403) and that deactivating an account cuts off its existing token.",
       "item": [
         {
-          "name": "26. List staff users",
+          "name": "List staff users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"No password hashes in the response\", () => pm.response.json().data.forEach(s => pm.expect(s).to.not.have.property(\"passwordHash\")));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -841,28 +2967,51 @@
               ]
             },
             "description": ""
-          }
-        },
-        {
-          "name": "27. Get staff user by ID",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/staff-users/1",
-              "host": [
-                "{{baseUrl}}"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
               ],
-              "path": [
-                "staff-users",
-                "1"
-              ]
-            },
-            "description": ""
-          }
+              "cookie": [],
+              "body": "{\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 2,\n  \"data\": [\n    {\n      \"staffId\": 1,\n      \"username\": \"admin\",\n      \"fullName\": \"Jayzel Cantor\",\n      \"role\": \"Admin\",\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.199Z\"\n    },\n    {\n      \"staffId\": 2,\n      \"username\": \"cashier\",\n      \"fullName\": \"Mark Lopez\",\n      \"role\": \"Staff\",\n      \"isActive\": true,\n      \"dateCreated\": \"2026-11-26T17:11:57.384Z\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "28. Create staff user",
+          "name": "Create staff user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"staffId\", pm.response.json().staffId);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -883,17 +3032,130 @@
             "description": "The password is hashed with bcrypt before it is stored.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"rdelacruz\",\n  \"password\": \"T3mpPass2026\",\n  \"fullName\": \"Rosa Dela Cruz\",\n  \"role\": \"Staff\"\n}",
+              "raw": "{\n  \"username\": \"barista{{runId}}\",\n  \"password\": \"brew2026\",\n  \"fullName\": \"Lea Reyes\",\n  \"role\": \"Staff\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"barista3136107\",\n  \"password\": \"brew2026\",\n  \"fullName\": \"Lea Reyes\",\n  \"role\": \"Staff\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"username\": \"barista3136107\",\n  \"fullName\": \"Lea Reyes\",\n  \"role\": \"Staff\",\n  \"isActive\": true,\n  \"staffId\": 3,\n  \"dateCreated\": \"2026-11-26T17:12:20.565Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "29. Update staff user",
+          "name": "Get staff user by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/staff-users/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff-users",
+                "{{staffId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users/3",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users",
+                    "3"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"staffId\": 3,\n  \"username\": \"barista3136107\",\n  \"fullName\": \"Lea Reyes\",\n  \"role\": \"Staff\",\n  \"isActive\": true,\n  \"dateCreated\": \"2026-11-26T17:12:20.565Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update staff user (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PATCH",
             "header": [
@@ -903,16 +3165,417 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/staff-users/2",
+              "raw": "{{baseUrl}}/staff-users/{{staffId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "staff-users",
-                "2"
+                "{{staffId}}"
               ]
             },
-            "description": "Deactivates an account without deleting it.",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Lea Marie Reyes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users/3",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users",
+                    "3"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"Lea Marie Reyes\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"staffId\": 3,\n  \"username\": \"barista3136107\",\n  \"fullName\": \"Lea Marie Reyes\",\n  \"role\": \"Staff\",\n  \"isActive\": true,\n  \"dateCreated\": \"2026-11-26T17:12:20.565Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login as the new staff (saves staffToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"staffToken\", pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"barista{{runId}}\",\n  \"password\": \"brew2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"barista3136107\",\n  \"password\": \"brew2026\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"staffId\": 3,\n  \"username\": \"barista3136107\",\n  \"fullName\": \"Lea Marie Reyes\",\n  \"role\": \"Staff\",\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<payload>.<signature>\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Staff awards points (allowed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/point-transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "point-transactions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": {{customerId}},\n  \"receiptNumber\": \"OR-{{runId}}-03\",\n  \"purchaseAmount\": 120\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"receiptNumber\": \"OR-3136107-03\",\n  \"purchaseAmount\": 120\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"customerId\": 1,\n  \"staffId\": 3,\n  \"receiptNumber\": \"OR-3136107-03\",\n  \"purchaseAmount\": 120,\n  \"pointsEarned\": 12,\n  \"transactionId\": 2,\n  \"transactionDate\": \"2026-11-26T17:12:21.109Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Staff tries to delete a reward (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards",
+                "{{rewardId}}"
+              ]
+            },
+            "description": "Valid token, wrong role: RolesGuard answers 403 Forbidden, not 401.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "403 Forbidden",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 403,\n  \"message\": \"You are not allowed to perform this action. Required role: Admin.\",\n  \"errors\": [\n    \"You are not allowed to perform this action. Required role: Admin.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:21.222Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete staff who has processed points (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/staff-users/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff-users",
+                "{{staffId}}"
+              ]
+            },
+            "description": "Their name is on a point award, so the account is deactivated instead of deleted."
+          },
+          "response": [
+            {
+              "name": "409 Conflict",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users/3",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users",
+                    "3"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 409,\n  \"message\": \"barista3136107 has processed 1 point award(s) and 0 claim(s), so the account cannot be deleted. Deactivate it instead (PATCH isActive: false) to block their login.\",\n  \"errors\": [\n    \"barista3136107 has processed 1 point award(s) and 0 claim(s), so the account cannot be deleted. Deactivate it instead (PATCH isActive: false) to block their login.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:21.301Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Deactivate staff (PATCH isActive false)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff-users/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff-users",
+                "{{staffId}}"
+              ]
+            },
+            "description": "",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isActive\": false\n}",
@@ -922,25 +3585,620 @@
                 }
               }
             }
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users/3",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users",
+                    "3"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isActive\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"staffId\": 3,\n  \"username\": \"barista3136107\",\n  \"fullName\": \"Lea Marie Reyes\",\n  \"role\": \"Staff\",\n  \"isActive\": false,\n  \"dateCreated\": \"2026-11-26T17:12:20.565Z\"\n}"
+            }
+          ]
         },
         {
-          "name": "30. Delete staff user",
+          "name": "Deactivated staff's old token is rejected (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "profile"
+              ]
+            },
+            "description": "The token is still unexpired, but JwtStrategy re-checks the account on every request.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/profile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "profile"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 401,\n  \"message\": \"This account is no longer active. Please contact the admin.\",\n  \"errors\": [\n    \"This account is no longer active. Please contact the admin.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:21.525Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Admin cannot delete own account (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/staff-users/3",
+              "raw": "{{baseUrl}}/staff-users/{{adminId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "staff-users",
-                "3"
+                "{{adminId}}"
+              ]
+            },
+            "description": "Stops an admin from locking everyone out by deleting or deactivating themselves."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/staff-users/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "staff-users",
+                    "1"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 400,\n  \"message\": \"You cannot delete your own account.\",\n  \"errors\": [\n    \"You cannot delete your own account.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:21.615Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Deletes & Integrity",
+      "description": "Shows what can and cannot be deleted, and the cascade from customers to their history.",
+      "item": [
+        {
+          "name": "Delete a reward that was claimed (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards",
+                "{{rewardId}}"
+              ]
+            },
+            "description": "A claimed reward is part of a member's history. Retire it instead."
+          },
+          "response": [
+            {
+              "name": "409 Conflict",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 409,\n  \"message\": \"Free Iced Americano 3136107 has been claimed 1 time(s), so it cannot be deleted. Retire it instead (PATCH isActive: false) to take it off the menu.\",\n  \"errors\": [\n    \"Free Iced Americano 3136107 has been claimed 1 time(s), so it cannot be deleted. Retire it instead (PATCH isActive: false) to take it off the menu.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:21.711Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retire the reward (PATCH isActive false)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Now retired\", () => pm.expect(pm.response.json().isActive).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards",
+                "{{rewardId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isActive\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"rewardId\": 4,\n  \"rewardName\": \"Free Iced Americano 3136107\",\n  \"description\": \"One 16oz iced americano, oat milk available\",\n  \"pointsRequired\": 20,\n  \"isActive\": false,\n  \"dateCreated\": \"2026-11-26T17:12:18.632Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{customerId}}"
+              ]
+            },
+            "description": "Admin only. ON DELETE CASCADE removes the member's point transactions and redemptions too."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Deleted customer is gone (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{customerId}}"
               ]
             },
             "description": ""
-          }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/customers/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "1"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 404,\n  \"message\": \"No customer exists with ID 1.\",\n  \"errors\": [\n    \"No customer exists with ID 1.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:22.038Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Their transactions went with them (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/point-transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "point-transactions",
+                "{{transactionId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/point-transactions/1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "point-transactions",
+                    "1"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 404,\n  \"message\": \"No transaction exists with ID 1.\",\n  \"errors\": [\n    \"No transaction exists with ID 1.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:22.147Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete the reward now that no claim uses it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards",
+                "{{rewardId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Deleted reward is gone (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rewards/{{rewardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rewards",
+                "{{rewardId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/rewards/4",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rewards",
+                    "4"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"statusCode\": 404,\n  \"message\": \"No reward exists with ID 4.\",\n  \"errors\": [\n    \"No reward exists with ID 4.\"\n  ],\n  \"timestamp\": \"2026-11-26T17:12:22.354Z\"\n}"
+            }
+          ]
         }
       ]
     }
