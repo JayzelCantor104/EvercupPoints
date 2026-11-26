@@ -1,5 +1,5 @@
 import {
-  Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany,
+  Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, Unique,
 } from 'typeorm';
 import { PointTransaction } from '../point-transactions/point-transaction.entity';
 import { Redemption } from '../redemptions/redemption.entity';
@@ -7,11 +7,12 @@ import { Redemption } from '../redemptions/redemption.entity';
 export type StaffRole = 'Staff' | 'Admin';
 
 @Entity('staff_users')
+@Unique('UQ_staff_username', ['username'])
 export class StaffUser {
   @PrimaryGeneratedColumn({ name: 'StaffID' })
   staffId: number;
 
-  @Column({ name: 'Username', type: 'varchar', length: 50, unique: true })
+  @Column({ name: 'Username', type: 'varchar', length: 50 })
   username: string;
 
   // removed from responses, see toPublic() in the service

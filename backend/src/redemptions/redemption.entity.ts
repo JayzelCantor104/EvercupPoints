@@ -27,14 +27,14 @@ export class Redemption {
   redemptionDate: Date;
 
   @ManyToOne(() => Customer, (c) => c.redemptions, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'CustomerID' })
+  @JoinColumn({ name: 'CustomerID', foreignKeyConstraintName: 'FK_rd_customer' })
   customer: Customer;
 
   @ManyToOne(() => Reward, (r) => r.redemptions)
-  @JoinColumn({ name: 'RewardID' })
+  @JoinColumn({ name: 'RewardID', foreignKeyConstraintName: 'FK_rd_reward' })
   reward: Reward;
 
   @ManyToOne(() => StaffUser, (s) => s.redemptions)
-  @JoinColumn({ name: 'StaffID' })
+  @JoinColumn({ name: 'StaffID', foreignKeyConstraintName: 'FK_rd_staff' })
   staff: StaffUser;
 }

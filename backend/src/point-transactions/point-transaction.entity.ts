@@ -1,11 +1,13 @@
 import {
   Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
-  ManyToOne, JoinColumn,
+  ManyToOne, JoinColumn, Unique,
 } from 'typeorm';
 import { Customer } from '../customers/customer.entity';
 import { StaffUser } from '../staff-users/staff-user.entity';
 
 @Entity('point_transactions')
+// a receipt can only be used once
+@Unique('UQ_receipt_number', ['receiptNumber'])
 export class PointTransaction {
   @PrimaryGeneratedColumn({ name: 'TransactionID' })
   transactionId: number;
@@ -16,8 +18,7 @@ export class PointTransaction {
   @Column({ name: 'StaffID' })
   staffId: number;
 
-  // a receipt can only be used once
-  @Column({ name: 'ReceiptNumber', type: 'varchar', length: 50, unique: true })
+  @Column({ name: 'ReceiptNumber', type: 'varchar', length: 50 })
   receiptNumber: string;
 
   @Column({ name: 'PurchaseAmount', type: 'decimal', precision: 10, scale: 2 })
@@ -30,10 +31,10 @@ export class PointTransaction {
   transactionDate: Date;
 
   @ManyToOne(() => Customer, (c) => c.pointTransactions, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'CustomerID' })
+  @JoinColumn({ name: 'CustomerID', foreignKeyConstraintName: 'FK_tx_customer' })
   customer: Customer;
 
   @ManyToOne(() => StaffUser, (s) => s.pointTransactions)
-  @JoinColumn({ name: 'StaffID' })
+  @JoinColumn({ name: 'StaffID', foreignKeyConstraintName: 'FK_tx_staff' })
   staff: StaffUser;
 }
