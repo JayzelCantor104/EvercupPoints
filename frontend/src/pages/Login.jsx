@@ -1,59 +1,52 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api, saveSession } from '../api';
+import Lobby from './Lobby';
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const [checking, setChecking] = useState(false);
   const navigate = useNavigate();
 
-  const submit = async (e) => {
+  const clockIn = async (e) => {
     e.preventDefault();
-    setError('');
-    setBusy(true);
+    setProblem('');
+    setChecking(true);
     try {
-      const data = await api.login(username, password);
-      saveSession(data);
-      onLogin(data);
+      const session = await api.login(username, password);
+      saveSession(session);
+      onLogin(session);
       navigate('/scan');
     } catch (err) {
-      setError(err.message);
+      setProblem(err.message);
     } finally {
-      setBusy(false);
+      setChecking(false);
     }
   };
 
   return (
-    <div className="login-page">
-      <div className="login-box">
-        <div className="card">
-          <h1>EvercupPoints</h1>
-          <p className="sub">Staff sign in</p>
-
-          {error && <div className="alert err">{error}</div>}
-
-          <form onSubmit={submit}>
-            <div className="field">
-              <label>Username</label>
-              <input value={username} onChange={(e) => setUsername(e.target.value)}
-                     autoComplete="username" required />
-            </div>
-            <div className="field">
-              <label>Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                     autoComplete="current-password" required />
-            </div>
-            <button className="primary" type="submit" disabled={busy} style={{ width: '100%' }}>
-              {busy ? 'Signing in...' : 'Sign in'}
-            </button>
-          </form>
-        </div>
-        <p className="muted" style={{ textAlign: 'center' }}>
-          Not a member yet? <Link to="/register">Join the loyalty program</Link>
-        </p>
-      </div>
-    </div>
+    <Lobby here="/login">
+      {problem && <div className="note-bitter">{problem}</div>}
+      <section className="slip">
+        <div className="slip-head"><span>Staff clock-in</span></div>
+        <form className="slip-body" onSubmit={clockIn}>
+          <label className="jot">
+            <span className="jot-label">Username</span>
+            <input value={username} onChange={(e) => setUsername(e.target.value)}
+                   autoComplete="username" required />
+          </label>
+          <label className="jot">
+            <span className="jot-label">Password</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                   autoComplete="current-password" required />
+          </label>
+          <button className="btn-brew wide" type="submit" disabled={checking}>
+            {checking ? 'Checking' : 'Clock in'}
+          </button>
+        </form>
+      </section>
+    </Lobby>
   );
 }

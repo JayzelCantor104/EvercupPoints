@@ -1,165 +1,177 @@
 import { useState, useRef, useEffect } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { api } from '../api';
+import { properName } from '../format';
 
 export default function Scan() {
-  const [customer, setCustomer] = useState(null);
-  const [manual, setManual] = useState('');
-  const [receipt, setReceipt] = useState('');
+  const [guest, setGuest] = useState(null);
+  const [typedCode, setTypedCode] = useState('');
+  const [receiptNo, setReceiptNo] = useState('');
   const [amount, setAmount] = useState('');
-  const [rewards, setRewards] = useState([]);
-  const [error, setError] = useState('');
-  const [okMsg, setOkMsg] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const scannerRef = useRef(null);
+  const [rewardMenu, setRewardMenu] = useState([]);
+  const [problem, setProblem] = useState('');
+  const [goodNews, setGoodNews] = useState('');
+  const [cameraOn, setCameraOn] = useState(false);
+  const lens = useRef(null);
+
+  const clearNotes = () => { setProblem(''); setGoodNews(''); };
 
   useEffect(() => {
-    api.listRewards(true).then((r) => setRewards(r.data)).catch(() => {});
-    return () => { stopScanner(); };
+    api.listRewards(true).then((res) => setRewardMenu(res.data)).catch(() => {});
+    return () => { stopCamera(); };
   }, []);
 
-  const stopScanner = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch { /* already stopped */ }
-      scannerRef.current = null;
+  const stopCamera = async () => {
+    if (lens.current) {
+      try { await lens.current.stop(); } catch { /* already stopped */ }
+      lens.current = null;
     }
-    setScanning(false);
+    setCameraOn(false);
   };
 
-  const startScanner = async () => {
-    setError(''); setOkMsg('');
-    setScanning(true);
+  const startCamera = async () => {
+    clearNotes();
+    setCameraOn(true);
     try {
-      const scanner = new Html5Qrcode('qr-reader');
-      scannerRef.current = scanner;
-      await scanner.start(
+      const reader = new Html5Qrcode('qr-reader');
+      lens.current = reader;
+      await reader.start(
         { facingMode: 'environment' },
         { fps: 10, qrbox: 250 },
         async (decoded) => {
-          await stopScanner();
-          lookup(decoded);
+          await stopCamera();
+          findGuest(decoded);
         },
         () => {},
       );
-    } catch (err) {
-      setError('Could not open the camera. The page must be on https or localhost.');
-      setScanning(false);
+    } catch {
+      setProblem('Could not open the camera. The page must be on https or localhost.');
+      setCameraOn(false);
     }
   };
 
-  const lookup = async (qrCode) => {
-    setError(''); setOkMsg('');
+  const findGuest = async (memberCode) => {
+    clearNotes();
     try {
-      setCustomer(await api.getCustomerByQr(qrCode));
+      setGuest(await api.getCustomerByQr(memberCode.trim().toUpperCase()));
     } catch (err) {
-      setCustomer(null);
-      setError(err.message);
+      setGuest(null);
+      setProblem(err.message);
     }
   };
 
-  const award = async (e) => {
+  const refreshGuest = async () => setGuest(await api.getCustomer(guest.customerId));
+
+  const ringUp = async (e) => {
     e.preventDefault();
-    setError(''); setOkMsg('');
+    clearNotes();
     try {
-      const tx = await api.awardPoints(customer.customerId, receipt, parseFloat(amount));
-      setOkMsg(`Added ${tx.pointsEarned} points for receipt ${tx.receiptNumber}.`);
-      setCustomer(await api.getCustomer(customer.customerId));
-      setReceipt(''); setAmount('');
+      const entry = await api.awardPoints(guest.customerId, receiptNo.trim(), parseFloat(amount));
+      setGoodNews(`+${entry.pointsEarned} pts for receipt ${entry.receiptNumber}.`);
+      await refreshGuest();
+      setReceiptNo('');
+      setAmount('');
     } catch (err) {
-      setError(err.message);
+      setProblem(err.message);
     }
   };
 
-  const claim = async (rewardId) => {
-    setError(''); setOkMsg('');
+  const handOver = async (reward) => {
+    clearNotes();
     try {
-      const r = await api.redeem(customer.customerId, rewardId);
-      setOkMsg(`Reward claimed. ${r.pointsUsed} points deducted.`);
-      setCustomer(await api.getCustomer(customer.customerId));
+      const claim = await api.redeem(guest.customerId, reward.rewardId);
+      setGoodNews(`${reward.rewardName} claimed. -${claim.pointsUsed} pts.`);
+      await refreshGuest();
     } catch (err) {
-      setError(err.message);
+      setProblem(err.message);
     }
   };
 
   return (
     <>
-      <h1>Scan a member</h1>
-      <p className="sub">Scan the customer's QR code, or type the code shown on their profile.</p>
+      <header className="pour-head">
+        <h1>Who's at the counter?</h1>
+        <p>Scan the member's QR, or type the code under it.</p>
+      </header>
 
-      {error && <div className="alert err">{error}</div>}
-      {okMsg && <div className="alert ok">{okMsg}</div>}
+      {problem && <div className="note-bitter">{problem}</div>}
+      {goodNews && <div className="note-sweet">{goodNews}</div>}
 
-      <div className="card">
-        <h2>Camera</h2>
-        <div id="qr-reader" />
-        {!scanning
-          ? <button className="primary" onClick={startScanner}>Start camera</button>
-          : <button className="primary" onClick={stopScanner}>Stop camera</button>}
+      <section className="slip">
+        <div className="slip-head"><span>Find member</span></div>
+        <div className="slip-body">
+          <div id="qr-reader" />
+          {cameraOn
+            ? <button className="btn-quiet" onClick={stopCamera}>Stop camera</button>
+            : <button className="btn-brew" onClick={startCamera}>Start camera</button>}
 
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
-          <label>Or enter the QR code manually</label>
-          <div className="row">
-            <input value={manual} onChange={(e) => setManual(e.target.value)}
-                   placeholder="EVC-0001-7F3A" />
-            <button className="primary" style={{ flex: '0 0 auto' }}
-                    onClick={() => lookup(manual.trim())} disabled={!manual.trim()}>
-              Look up
-            </button>
-          </div>
+          <div className="or-line">OR</div>
+
+          <form className="jot-row" onSubmit={(e) => { e.preventDefault(); findGuest(typedCode); }}>
+            <label className="jot" style={{ marginBottom: 0 }}>
+              <span className="jot-label">Member code</span>
+              <input className="mono" value={typedCode} onChange={(e) => setTypedCode(e.target.value)}
+                     placeholder="EVC-0001-7F3A" />
+            </label>
+            <button className="btn-brew" type="submit" disabled={!typedCode.trim()}>Look up</button>
+          </form>
         </div>
-      </div>
+      </section>
 
-      {customer && (
+      {guest && (
         <>
-          <div className="card">
-            <h2>{customer.firstName} {customer.lastName}</h2>
-            <p className="muted" style={{ marginTop: -8 }}>
-              {customer.email} &nbsp;·&nbsp; <span className="pill">{customer.qrCode}</span>
-            </p>
-            <div className="points">{customer.pointsBalance} points</div>
-          </div>
+          <section className="slip">
+            <div className="slip-head">
+              <span>Member</span>
+              <span className="code-chip">{guest.qrCode}</span>
+            </div>
+            <div className="slip-body jot-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>{properName(`${guest.firstName} ${guest.lastName}`)}</h2>
+                <div className="faint">{guest.email}</div>
+              </div>
+              <div className="tally">{guest.pointsBalance}<small>PTS</small></div>
+            </div>
+          </section>
 
-          <div className="card">
-            <h2>Award points for a purchase</h2>
-            <form onSubmit={award}>
-              <div className="row">
-                <div className="field">
-                  <label>Receipt number</label>
-                  <input value={receipt} onChange={(e) => setReceipt(e.target.value)}
+          <div className="split">
+            <section className="slip">
+              <div className="slip-head"><span>Ring up a purchase</span><span className="aside">1 pt / ₱10</span></div>
+              <form className="slip-body" onSubmit={ringUp}>
+                <label className="jot">
+                  <span className="jot-label">UTAK receipt no.</span>
+                  <input className="mono" value={receiptNo} onChange={(e) => setReceiptNo(e.target.value)}
                          placeholder="OR-2026-004901" required />
-                </div>
-                <div className="field">
-                  <label>Purchase amount</label>
+                </label>
+                <label className="jot">
+                  <span className="jot-label">Amount paid (₱)</span>
                   <input type="number" step="0.01" min="0.01" value={amount}
                          onChange={(e) => setAmount(e.target.value)} placeholder="250.00" required />
-                </div>
-              </div>
-              <button className="primary" type="submit">Add points</button>
-              <p className="muted" style={{ marginBottom: 0 }}>
-                1 point for every 10 pesos. A receipt number can only be claimed once.
-              </p>
-            </form>
-          </div>
+                </label>
+                <button className="btn-brew wide" type="submit">Add points</button>
+                <p className="faint" style={{ marginBottom: 0 }}>Each receipt can earn points only once.</p>
+              </form>
+            </section>
 
-          <div className="card">
-            <h2>Claim a reward</h2>
-            {rewards.length === 0 && <p className="muted">No active rewards.</p>}
-            <table>
-              <tbody>
-                {rewards.map((r) => (
-                  <tr key={r.rewardId}>
-                    <td>{r.rewardName}</td>
-                    <td className="muted">{r.pointsRequired} pts</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="primary" onClick={() => claim(r.rewardId)}
-                              disabled={customer.pointsBalance < r.pointsRequired}>
-                        Claim
-                      </button>
-                    </td>
-                  </tr>
+            <section className="slip">
+              <div className="slip-head"><span>Hand over a reward</span></div>
+              <div className="slip-body" style={{ paddingTop: 4, paddingBottom: 4 }}>
+                {rewardMenu.length === 0 && <p className="faint">No active rewards.</p>}
+                {rewardMenu.map((reward) => (
+                  <div key={reward.rewardId} className="menu-item" style={{ alignItems: 'center' }}>
+                    <div>
+                      <div className="menu-name">{reward.rewardName}</div>
+                      <div className="short">{reward.pointsRequired} pts</div>
+                    </div>
+                    <button className="btn-quiet" onClick={() => handOver(reward)}
+                            disabled={guest.pointsBalance < reward.pointsRequired}
+                            style={guest.pointsBalance < reward.pointsRequired ? { opacity: .35, cursor: 'default' } : null}>
+                      Claim
+                    </button>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </section>
           </div>
         </>
       )}

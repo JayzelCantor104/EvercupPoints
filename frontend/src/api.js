@@ -56,6 +56,8 @@ export const api = {
     request(`/rewards${activeOnly ? '?isActive=true' : ''}`),
   createReward: (data) => request('/rewards', { method: 'POST', body: JSON.stringify(data) }),
   deleteReward: (id) => request(`/rewards/${id}`, { method: 'DELETE' }),
+  setRewardServing: (id, isActive) =>
+    request(`/rewards/${id}`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
 
   awardPoints: (customerId, receiptNumber, purchaseAmount) =>
     request('/point-transactions', {
@@ -65,4 +67,29 @@ export const api = {
 
   redeem: (customerId, rewardId) =>
     request('/redemptions', { method: 'POST', body: JSON.stringify({ customerId, rewardId }) }),
+
+  // member card (public)
+  openCard: (email, memberCode) =>
+    request('/customers/card', { method: 'POST', body: JSON.stringify({ email, memberCode }) }),
+  resendCard: (email) =>
+    request('/customers/card/resend', { method: 'POST', body: JSON.stringify({ email }) }),
 };
+
+// remember the member's card on this device
+// try/catch because localStorage can be blocked in private mode
+const CARD_KEY = 'evercup_member_card';
+
+export function rememberCard(email, memberCode) {
+  try { localStorage.setItem(CARD_KEY, JSON.stringify({ email, memberCode })); } catch { /* ignore */ }
+}
+export function recallCard() {
+  try {
+    const raw = localStorage.getItem(CARD_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+export function forgetCard() {
+  try { localStorage.removeItem(CARD_KEY); } catch { /* ignore */ }
+}

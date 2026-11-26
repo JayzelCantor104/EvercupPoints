@@ -1,77 +1,96 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
+import { properName, shortDate } from '../format';
 
-export default function Customers({ user }) {
-  const [rows, setRows] = useState([]);
-  const [search, setSearch] = useState('');
-  const [error, setError] = useState('');
+export default function Customers({ barista }) {
+  const [roster, setRoster] = useState([]);
+  const [rosterTotal, setRosterTotal] = useState(0);
+  const [lookFor, setLookFor] = useState('');
+  const [problem, setProblem] = useState('');
+  const isAdmin = barista.role === 'Admin';
 
-  const load = async (term = '') => {
-    setError('');
+  const loadRoster = async (term = '') => {
+    setProblem('');
     try {
       const res = await api.listCustomers(term);
-      setRows(res.data);
+      setRoster(res.data);
+      setRosterTotal(res.total);
     } catch (err) {
-      setError(err.message);
+      setProblem(err.message);
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { loadRoster(); }, []);
 
-  const remove = async (id) => {
-    setError('');
+  const dropMember = async (member) => {
+    const name = properName(`${member.firstName} ${member.lastName}`);
+    if (!window.confirm(`Remove ${name} and all of their points history? This cannot be undone.`)) return;
+    setProblem('');
     try {
-      await api.deleteCustomer(id);
-      load(search);
+      await api.deleteCustomer(member.customerId);
+      loadRoster(lookFor);
     } catch (err) {
-      setError(err.message);
+      setProblem(err.message);
     }
   };
 
   return (
     <>
-      <h1>Members</h1>
-      <p className="sub">Everyone enrolled in the loyalty program.</p>
+      <header className="pour-head">
+        <h1>Members</h1>
+        <p>Everyone carrying an Evercup card.</p>
+      </header>
 
-      {error && <div className="alert err">{error}</div>}
+      {problem && <div className="note-bitter">{problem}</div>}
 
-      <div className="card">
-        <form className="row" onSubmit={(e) => { e.preventDefault(); load(search); }}>
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-                 placeholder="Search by name or email" />
-          <button className="primary" style={{ flex: '0 0 auto' }} type="submit">Search</button>
-        </form>
-      </div>
+      <section className="slip">
+        <div className="slip-head">
+          <span>Roster</span>
+          <span className="aside">{rosterTotal} {rosterTotal === 1 ? 'member' : 'members'}</span>
+        </div>
+        <div className="slip-body">
+          <form className="jot-row" onSubmit={(e) => { e.preventDefault(); loadRoster(lookFor); }}>
+            <label className="jot">
+              <span className="jot-label">Search name or email</span>
+              <input value={lookFor} onChange={(e) => setLookFor(e.target.value)} />
+            </label>
+            <button className="btn-brew" type="submit" style={{ marginBottom: 18 }}>Search</button>
+          </form>
 
-      <div className="card">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th><th>Name</th><th>Email</th><th>QR code</th><th>Points</th>
-              {user.role === 'Admin' && <th></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.customerId}>
-                <td>{c.customerId}</td>
-                <td>{c.firstName} {c.lastName}</td>
-                <td className="muted">{c.email}</td>
-                <td><span className="pill">{c.qrCode}</span></td>
-                <td><strong>{c.pointsBalance}</strong></td>
-                {user.role === 'Admin' && (
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="link" onClick={() => remove(c.customerId)}>Delete</button>
-                  </td>
+          <div className="ledger-wrap">
+            <table className="ledger">
+              <thead>
+                <tr>
+                  <th>#</th><th>Member</th><th>Code</th><th>Joined</th><th className="end">Points</th>
+                  {isAdmin && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {roster.map((member) => (
+                  <tr key={member.customerId}>
+                    <td className="faint">{String(member.customerId).padStart(3, '0')}</td>
+                    <td>
+                      {properName(`${member.firstName} ${member.lastName}`)}
+                      <div className="faint">{member.email}</div>
+                    </td>
+                    <td><span className="code-chip">{member.qrCode}</span></td>
+                    <td className="faint">{shortDate(member.dateRegistered)}</td>
+                    <td className="num"><b>{member.pointsBalance}</b></td>
+                    {isAdmin && (
+                      <td className="end">
+                        <button className="btn-void" onClick={() => dropMember(member)}>Remove</button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {roster.length === 0 && (
+                  <tr><td colSpan={isAdmin ? 6 : 5} className="empty">No members match.</td></tr>
                 )}
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr><td colSpan="6" className="muted">No members found.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </>
   );
 }
